@@ -3,6 +3,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { body, param, validationResult } from 'express-validator';
 
 dotenv.config();
 
@@ -65,110 +66,42 @@ const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
   });
 };
 
-// Validate name field for a user. Returns an array of error messages if validation fails.
-function validateName(name: string): string[] {
-  const errors: string[] = [];
+// Register a new user with advanced validation
+app.post('/register', 
+  body('name').isLength({ min: 1, max: 100 }).withMessage("Validation error: 'name' field is required and cannot exceed 100 characters."),
+  body('email').isEmail().withMessage("Validation error: 'email' must be a valid email address."),
+  body('email').custom((value, { req }) => {
+    if (users.some(user => user.email.toLowerCase() === value.toLowerCase())) {
+      throw new Error('Validation error: A user with this email already exists.');
+    }
+    return true;
+  }),
+  body('age').isInt({ min: 1, max: 120 }).withMessage("Validation error: 'age' must be a positive number between 1 and 120."),
+  body('password').isLength({ min: 6 }).withMessage("Validation error: 'password' must be at least 6 characters long."),
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array().map(error => error.msg) });
+    }
 
-  if (!name) {
-    errors.push("Validation error: 'name' field is required.");
+    const { name, email, age, password } = req.body;
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const user: User = { id: uuidv4(), name, email, age, password: hashedPassword };
+    users.push(user);
+
+    const token = jwt.sign({ id: user.id, email: user.email }, process.env.TOKEN_SECRET!, { expiresIn: '1h' });
+
+    res.status(201).json({ message: 'User registered successfully', user: { ...user, password: undefined }, token });
   }
-  if (typeof name === 'number' || !isNaN(Number(name))) {
-    errors.push("Validation error: 'name' must be a string.");
-  }
-  if (name === "") {
-    errors.push("Validation error: 'name' cannot be an empty string.");
-  }
-  if (name.length > 100) {
-    errors.push("Validation error: 'name' cannot exceed 100 characters.");
-  }
-  return errors;
-}
-
-// Validate email field for a user. Returns an array of error messages if validation fails.
-function validateEmail(email: string, currentUserId: string | null = null): string[] {
-  const errors: string[] = [];
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  if (!email) {
-    errors.push("Validation error: 'email' field is required.");
-  }
-  if (typeof email === 'number' || !isNaN(Number(email))) {
-    errors.push("Validation error: 'email' must be a string.");
-  }
-  if (email === "") {
-    errors.push("Validation error: 'email' cannot be an empty string.");
-  }
-  if (!emailRegex.test(email)) {
-    errors.push("Validation error: 'email' must be a valid email address.");
-  }
-  if (email.length > 100) {
-    errors.push("Validation error: 'email' cannot exceed 100 characters.");
-  }
-  if (users.find(user => user.email.toLowerCase() === email.toLowerCase() && user.id !== currentUserId)) {
-    errors.push('Validation error: A user with this email already exists.');
-  }
-  return errors;
-}
-
-// Validate age field for a user. Returns an array of error messages if validation fails.
-function validateAge(age: number): string[] {
-  const errors: string[] = [];
-
-  if (age === undefined || age === null) {
-    errors.push("Validation error: 'age' field is required.");
-  } else if (isNaN(Number(age))) {
-    errors.push("Validation error: 'age' must be a number.");
-  } else if (age <= 0 || age > 120) {
-    errors.push("Validation error: 'age' must be a positive number between 1 and 120.");
-  }
-  return errors;
-}
-
-// Validate password field for a user. Returns an array of error messages if validation fails.
-function validatePassword(password: string): string[] {
-  const errors: string[] = [];
-
-  if (!password) {
-    errors.push("Validation error: 'password' field is required.");
-  } 
-  if (password.length < 6) {
-    errors.push("Validation error: 'password' must be at least 6 characters long.");
-  }
-  
-  return errors;
-}
-
-
-// Register a new user
-app.post('/register', async (req: Request, res: Response) => {
-  const { name, email, age, password } = req.body;
-
-  let errors: string[] = [];
-  errors = errors.concat(validateName(name));
-  errors = errors.concat(validateEmail(email));
-  errors = errors.concat(validateAge(age));
-  errors = errors.concat(validatePassword(password));
-
-  if (errors.length > 0) {
-    return res.status(400).json({ errors });
-  }
-
-  const hashedPassword = await bcrypt.hash(password, 10);
-
-  const user: User = { id: uuidv4(), name, email, age, password: hashedPassword };
-  users.push(user);
-
-  const token = jwt.sign({ id: user.id, email: user.email }, process.env.TOKEN_SECRET!, { expiresIn: '1h' });
-
-  res.status(201).json({ message: 'User registered successfully', user: { ...user, password: undefined }, token });
-});
-
+);
 // Login user
 app.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   const user = users.find(user => user.email === email);
-  
+
   if (!user) {
     return res.status(400).json({ error: 'User not found with this email' });
   }
@@ -181,53 +114,50 @@ app.post('/login', async (req: Request, res: Response) => {
   res.json({ message: 'Login successful', token });
 });
 
-// Update an existing user's information. Validates input and updates the user in the users array.
-app.put('/users/:id', authenticateToken, (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { name, email, age } = req.body;
-  const userIndex = users.findIndex(user => user.id === id);
+// Update an existing user's information with express-validator
+app.put('/users/:id', 
+  authenticateToken,
+  body('name').optional().isLength({ min: 1, max: 100 }).withMessage("Validation error: 'name' field cannot exceed 100 characters."),
+  body('email').optional().isEmail().withMessage("Validation error: 'email' must be a valid email address."),
+  body('email').custom((value, { req }) => {
+    const userIndex = users.findIndex(user => user.email.toLowerCase() === value.toLowerCase() && user.id !== req.params!.id!);
+    if (userIndex !== -1) {
+      throw new Error('Validation error: A user with this email already exists.');
+    }
+    return true;
+  }),
+  body('age').optional().isInt({ min: 1, max: 120 }).withMessage("Validation error: 'age' must be a positive number between 1 and 120."),
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array().map(error => error.msg) });
+    }
 
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'Error: User with ID not found.' });
+    const { id } = req.params;
+    const { name, email, age } = req.body;
+    const userIndex = users.findIndex(user => user.id === id);
+
+    if (userIndex === -1) {
+      return res.status(404).json({ error: 'Error: User with ID not found.' });
+    }
+
+    // Ensure that the user ID from the token matches the ID in the request
+    if (req.user.id !== id) {
+      return res.status(403).json({ error: 'Unauthorized: You do not have permission to update this user.' });
+    }
+
+    const updatedUser: User = {
+      id,
+      name: name || users[userIndex].name,
+      email: email || users[userIndex].email,
+      age: age || users[userIndex].age,
+      password: users[userIndex].password
+    };
+
+    users[userIndex] = updatedUser;
+    res.status(200).json({ message: 'User updated successfully', updatedUser: { ...updatedUser, password: undefined } });
   }
-
-  // Ensure that the user ID from the token matches the ID in the request
-  if (req.user.id !== id) {
-    return res.status(403).json({ error: 'Unauthorized: You do not have permission to update this user.' });
-  }
-
-  // Check if at least one valid field is present
-  if (!name && !email && !age) {
-    return res.status(422).json({ error: 'Error: At least one field (name, email, age) must be present for this operation.' });
-  }
-
-  let errors: string[] = [];
-
-  if (name) {
-    errors = errors.concat(validateName(name));
-  }
-  if (email) {
-    errors = errors.concat(validateEmail(email, id));
-  }
-  if (age) {
-    errors = errors.concat(validateAge(age));
-  }
-
-  if (errors.length > 0) {
-    return res.status(400).json({ errors });
-  }
-
-  const updatedUser: User = {
-    id,
-    name: name || users[userIndex].name,
-    email: email || users[userIndex].email,
-    age: age || users[userIndex].age,
-    password: users[userIndex].password
-  };
-
-  users[userIndex] = updatedUser;
-  res.status(200).json({ message: 'User updated successfully', updatedUser: { ...updatedUser, password: undefined } });
-});
+);
 
 // Retrieve a list of all users.
 app.get('/users', (req: Request, res: Response) => {
