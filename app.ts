@@ -30,6 +30,7 @@ interface User {
 }
 
 let users: User[] = [];
+let blacklistedTokens: string[] = [];
 
 // Function to create a dummy user
 const createDummyUser = async () => {
@@ -81,21 +82,51 @@ users = users.concat(generateUsers(50)); // Adds 50 users
 // Display a message to indicate users have been added
 console.log('Added 50 users for testing pagination and sorting:', users.length);
 
-
 const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   if (!token) return res.sendStatus(401);
 
   jwt.verify(token, process.env.TOKEN_SECRET!, (err: any, user: any) => {
-    if (err) return res.sendStatus(403);
+    if (err) return res.status(403).json({ error: 'You must be authenticated to access this route' });;
     req.user = user;
     next();
   });
 };
 
+// Middleware to block authenticated users from certain routes
+const blockAuthenticatedUsers = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token) {
+    jwt.verify(token, process.env.TOKEN_SECRET!, (err: any) => {
+      if (!err) {
+        return res.status(403).json({ error: 'Authenticated users cannot access this route.' });
+      }
+      next();
+    });
+  } else {
+    next();
+  }
+};
+
+// Middleware to check if token is blacklisted
+const checkBlacklist = (req: Request, res: Response, next: NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (blacklistedTokens.includes(token!)) {
+    return res.status(401).json({ error: 'Token has been blacklisted' });
+  }
+
+  next();
+};
+
 // Register a new user with advanced validation
 app.post('/register', 
+  checkBlacklist,
+  blockAuthenticatedUsers,
   body('name').isLength({ min: 1, max: 100 }).withMessage("Validation error: 'name' field is required and cannot exceed 100 characters."),
   body('email').isEmail().withMessage("Validation error: 'email' must be a valid email address."),
   body('email').custom((value, { req }) => {
@@ -124,8 +155,9 @@ app.post('/register',
     res.status(201).json({ message: 'User registered successfully', user: { ...user, password: undefined }, token });
   }
 );
+
 // Login user
-app.post('/login', async (req: Request, res: Response) => {
+app.post('/login', checkBlacklist, blockAuthenticatedUsers, async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
   const user = users.find(user => user.email === email);
@@ -145,6 +177,7 @@ app.post('/login', async (req: Request, res: Response) => {
 // Update an existing user's information with express-validator
 app.put('/users/:id', 
   authenticateToken,
+  checkBlacklist,
   body('name').optional().isLength({ min: 1, max: 100 }).withMessage("Validation error: 'name' field cannot exceed 100 characters."),
   body('email').optional().isEmail().withMessage("Validation error: 'email' must be a valid email address."),
   body('email').custom((value, { req }) => {
@@ -186,6 +219,20 @@ app.put('/users/:id',
     res.status(200).json({ message: 'User updated successfully', updatedUser: { ...updatedUser, password: undefined } });
   }
 );
+
+// Logout user and invalidate token
+app.post('/logout', authenticateToken, checkBlacklist, (req: Request, res: Response) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (token) {
+    blacklistedTokens.push(token);
+    res.status(200).json({ message: 'Logout successful' });
+  } else {
+    res.status(400).json({ error: 'Invalid token' });
+  }
+});
+
 
 // Retrieve a list of all users with sorting, filtering, and pagination.
 app.get('/users', (req: Request, res: Response) => {
@@ -244,7 +291,7 @@ app.get('/users/:id', (req: Request, res: Response) => {
 });
 
 // Delete a user by ID.
-app.delete('/users/:id', authenticateToken, (req: Request, res: Response) => {
+app.delete('/users/:id', authenticateToken, checkBlacklist, (req: Request, res: Response) => {
   const { id } = req.params;
   const userIndex = users.findIndex(user => user.id === id);
 
