@@ -4,11 +4,15 @@ import { v4 as uuidv4 } from 'uuid';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { body, param, validationResult } from 'express-validator';
+import morgan from 'morgan';  // Import morgan
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// Use morgan for logging
+app.use(morgan('combined'));
 
 // Extend the Request interface to include user property
 declare module 'express-serve-static-core' {
