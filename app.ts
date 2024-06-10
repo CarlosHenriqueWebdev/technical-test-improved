@@ -31,7 +31,7 @@ let users: User[] = [];
 const createDummyUser = async () => {
   const dummyPassword = await bcrypt.hash('dummyPassword123', 10);
   const dummyUser: User = {
-    id: "123",
+    id: "b1c3620f-ecd6-4d26-9ce5-88d83d2f3cae",
     name: 'Dummy User',
     email: 'dummy@example.com',
     age: 30,
@@ -53,6 +53,30 @@ const createDummyUser = async () => {
 
 // Call the function to create a dummy user
 createDummyUser();
+
+// Generate some dummy users
+const generateUsers = (count: number) => {
+  let generatedUsers = [];
+  for (let i = 0; i < count; i++) {
+    const password = `password${i + 1}`;
+    const hashedPassword = bcrypt.hashSync(password, 10);
+    generatedUsers.push({
+      id: uuidv4(),
+      name: `User${i + 2}`,
+      email: `user${i + 2}@example.com`,
+      age: Math.floor(Math.random() * 50) + 18, // Random age between 18 and 68
+      password: hashedPassword
+    });
+  }
+  return generatedUsers;
+};
+
+// Add multiple users at once
+users = users.concat(generateUsers(50)); // Adds 50 users
+
+// Display a message to indicate users have been added
+console.log('Added 50 users for testing pagination and sorting:', users.length);
+
 
 const authenticateToken = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers['authorization'];
@@ -159,13 +183,49 @@ app.put('/users/:id',
   }
 );
 
-// Retrieve a list of all users.
+// Retrieve a list of all users with sorting, filtering, and pagination.
 app.get('/users', (req: Request, res: Response) => {
-  if (users.length === 0) {
+  let filteredUsers = users;
+
+  // Filter users by name
+  if (req.query.name) {
+    const nameFilter = req.query.name.toString().toLowerCase();
+    filteredUsers = filteredUsers.filter(user => user.name.toLowerCase().includes(nameFilter));
+  }
+
+  // Filter users by email
+  if (req.query.email) {
+    const emailFilter = req.query.email.toString().toLowerCase();
+    filteredUsers = filteredUsers.filter(user => user.email.toLowerCase().includes(emailFilter));
+  }
+
+  // Sort users by name or age
+  if (req.query.sortBy === 'name') {
+    filteredUsers.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (req.query.sortBy === 'age') {
+    filteredUsers.sort((a, b) => a.age - b.age);
+  }
+
+  // Pagination
+  const page = parseInt(req.query.page as string) || 1;
+  const pageSize = parseInt(req.query.pageSize as string) || 10;
+  const startIndex = (page - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+
+  if (filteredUsers.length === 0) {
     return res.status(404).json({ error: 'Error: No users found.' });
   }
-  res.status(200).json({ message: 'All current users found', users: users.map(user => ({ ...user, password: undefined })) });
+
+  res.status(200).json({
+    message: 'All current users found',
+    totalUsers: filteredUsers.length,
+    page,
+    pageSize,
+    users: paginatedUsers.map(user => ({ ...user, password: undefined }))
+  });
 });
+
 
 // Retrieve a specific user by ID.
 app.get('/users/:id', (req: Request, res: Response) => {
