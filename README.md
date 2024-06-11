@@ -174,6 +174,16 @@ Aqui estão alguns exemplos de endpoints disponíveis:
 
 - `DELETE http://localhost:3000/users/<seu-id>`: Exclui um usuário específico. Não funciona se o usuário não existir. Para iniciar, basta apenas colocar a rota DELETE com o ID e enviar. Se não houver ID ou ele estiver incorreto, dá um erro. Impossivel de usar se você não tiver um token de autorização que é o mesmo do ID, assim sendo impossivel deletar outro usuário.
 
+## Teste Básico com Jest
+
+Os testes são essenciais para garantir a qualidade e o funcionamento correto da sua aplicação. Para isso, foram desenvolvidos testes básicos utilizando Jest em conjunto com supertest para testar o userController. Atualmente fiz bem rápido mesmo então não tem tanta coisa assim, mais cobre bastante parte da API no geral.
+
+Para executar os testes, basta abrir o terminal e executar o seguinte comando:
+
+```bash
+npm test
+```
+
 ## Mensagem
 
 Oi, boa noite! Se precisar de mais alguma informação ou se tiver alguma dúvida sobre o projeto, fique à vontade para entrar em contato comigo[carloshenrique.webdev@gmail.com]. Estou disponível para ajudar no que for necessário. Obrigado pela oportunidade e tenha uma ótima semana!
